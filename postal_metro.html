@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>postalómetro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Archivo', sans-serif;
+            background-color: #ffffff;
+            color: #000000;
+        }
+        .fade-in {
+            animation: fadeIn 0.25s ease-in-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-6 md:p-12 selection:bg-black selection:text-white">
+
+    <!-- Top header / Navigation bar -->
+    <header class="w-full max-w-3xl mx-auto flex flex-col items-center pt-8 pb-12">
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight cursor-pointer hover:opacity-75 transition-opacity" onclick="switchView('home')">
+            postalómetro
+        </h1>
+        <div id="subtitle-view" class="text-sm font-normal text-neutral-600 mt-1 h-6"></div>
+    </header>
+
+    <!-- Main dynamic content container -->
+    <main id="main-content" class="w-full max-w-xl mx-auto flex-grow flex flex-col items-center justify-start text-center">
+        <!-- Rendered dynamically via JS -->
+    </main>
+
+    <!-- Global Footer / PIN Modal Trigger / Status -->
+    <footer class="w-full max-w-xl mx-auto pt-12 pb-4 flex justify-between items-center text-xs text-neutral-400">
+        <div id="sync-status" class="flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span> Local ready
+        </div>
+        <div>
+            <button onclick="openPinModal()" class="hover:text-black transition-colors underline underline-offset-4 cursor-pointer">
+                modo edición (pin)
+            </button>
+        </div>
+    </footer>
+
+    <!-- PIN Modal -->
+    <div id="pin-modal" class="fixed inset-0 bg-black/40 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
+        <div class="bg-white border border-neutral-200 p-6 rounded-lg max-w-xs w-full shadow-lg text-left fade-in">
+            <h3 class="font-semibold text-sm mb-3">Ingresar PIN de edición</h3>
+            <p class="text-xs text-neutral-500 mb-4">Introduce el código para habilitar la actualización de stock.</p>
+            <input type="password" id="pin-input" placeholder="••••" class="w-full border border-neutral-300 rounded px-3 py-2 text-sm mb-4 focus:outline-none focus:border-black tracking-widest text-center" maxlength="4">
+            <div class="flex justify-end gap-2">
+                <button onclick="closePinModal()" class="px-3 py-1.5 text-xs text-neutral-600 hover:text-black cursor-pointer">cancelar</button>
+                <button onclick="verifyPin()" class="px-4 py-1.5 text-xs bg-black text-white rounded hover:bg-neutral-800 cursor-pointer">entrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 bg-black text-white text-xs px-4 py-2.5 rounded shadow-lg transform translate-y-12 opacity-0 transition-all duration-300 z-50 pointer-events-none">
+        Cambios guardados correctamente
+    </div>
+
+    <script>
+        // Default initial data structure
+        const defaultData = {
+            cajitas: {
+                cantidad: 42,
+                ultimaCompra: "12/03/2026",
+                whatsappMoreusa: "wa.me/5491140439364"
+            },
+            postales: [
+                { id: 1, nombre: "Biosferas", stock: 120 },
+                { id: 2, nombre: "Adopt the world", stock: 85 },
+                { id: 3, nombre: "Planet B", stock: 200 },
+                { id: 4, nombre: "BAMAR", stock: 64 },
+                { id: 5, nombre: "ADNFT", stock: 110 },
+                { id: 6, nombre: "The Earth Pulse", stock: 95 },
+                { id: 7, nombre: "Proyecto Utopia", stock: 150 },
+                { id: 8, nombre: "Sunflower", stock: 78 },
+                { id: 9, nombre: "Quo Vadis", stock: 130 },
+                { id: 10, nombre: "Fragile", stock: 45 },
+                { id: 11, nombre: "Biometrika", stock: 90 },
+                { id: 12, nombre: "Speculative Futures", stock: 115 },
+                { id: 13, nombre: "Performance en el Desierto", stock: 60 }
+            ],
+            archivos: [
+                { fecha: "10/02/2026", nota: "Revisión general de inventario de postales y empaque de nuevas cajitas." },
+                { fecha: "15/01/2026", nota: "Envío de lote inicial para muestra de arte contemporáneo." }
+            ],
+            contactoUnigraf: {
+                nombre: "Gastón",
+                whatsapp: "+54 9 11 6125-7171",
+                link: "https://wa.me/5491161257171"
+            }
+        };
+
+        // Load data from localStorage or fallback to default
+        let appData = JSON.parse(localStorage.getItem('postalometro_data')) || defaultData;
+        let currentView = 'home';
+        let isEditMode = false;
+
+        function saveData() {
+            localStorage.setItem('postalometro_data', JSON.stringify(appData));
+            showToast();
+            render();
+        }
+
+        function showToast(msg = "Actualizado correctamente") {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.remove('translate-y-12', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-12', 'opacity-0');
+            }, 2500);
+        }
+
+        function switchView(view) {
+            currentView = view;
+            render();
+        }
+
+        // PIN Modal logic
+        function openPinModal() {
+            if (isEditMode) {
+                isEditMode = false;
+                showToast("Modo edición desactivado");
+                render();
+                return;
+            }
+            document.getElementById('pin-modal').classList.remove('hidden');
+            document.getElementById('pin-modal').classList.add('flex');
+            document.getElementById('pin-input').value = '';
+            document.getElementById('pin-input').focus();
+        }
+
+        function closePinModal() {
+            document.getElementById('pin-modal').classList.remove('flex');
+            document.getElementById('pin-modal').classList.add('hidden');
+        }
+
+        function verifyPin() {
+            const pin = document.getElementById('pin-input').value;
+            // Simple PIN code for artist/assistant
+            if (pin === '2026' || pin === '1234') {
+                isEditMode = true;
+                closePinModal();
+                showToast("Modo edición activado ✨");
+                render();
+            } else {
+                showToast("PIN incorrecto (probá con 2026)");
+            }
+        }
+
+        // Render Views matching reference design
+        function render() {
+            const subtitleEl = document.getElementById('subtitle-view');
+            const container = document.getElementById('main-content');
+            container.innerHTML = '';
+            container.className = "w-full max-w-xl mx-auto flex-grow flex flex-col items-center justify-start text-center fade-in";
+
+            if (currentView === 'home') {
+                subtitleEl.innerText = '';
+                container.innerHTML = `
+                    <div class="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 mt-16 md:mt-24 text-base font-normal">
+                        <button onclick="switchView('cajitas')" class="hover:opacity-60 transition-opacity cursor-pointer">stock de cajitas</button>
+                        <button onclick="switchView('postales')" class="hover:opacity-60 transition-opacity cursor-pointer">stock de postales</button>
+                        <button onclick="switchView('archivos')" class="hover:opacity-60 transition-opacity cursor-pointer">archivos</button>
+                    </div>
+                `;
+            } else if (currentView === 'cajitas') {
+                subtitleEl.innerText = 'stock de cajitas';
+                container.innerHTML = `
+                    <div class="w-full text-left mt-8 md:mt-12 space-y-6">
+                        <div>
+                            <h2 class="font-bold text-sm tracking-wide mb-3">materiales:</h2>
+                            <div class="space-y-2 text-sm pl-2">
+                                <div class="flex justify-between items-center py-1 border-b border-neutral-100">
+                                    <span class="text-neutral-700">última compra:</span>
+                                    ${isEditMode ? 
+                                        `<input type="text" id="edit-fecha" value="${appData.cajitas.ultimaCompra}" class="border border-neutral-300 rounded px-2 py-0.5 text-sm w-32 text-right">` :
+                                        `<span>(${appData.cajitas.ultimaCompra})</span>`
+                                    }
+                                </div>
+                                <div class="flex justify-between items-center py-1 border-b border-neutral-100">
+                                    <span class="text-neutral-700">hay cajitas armadas:</span>
+                                    ${isEditMode ? 
+                                        `<input type="number" id="edit-cajitas" value="${appData.cajitas.cantidad}" class="border border-neutral-300 rounded px-2 py-0.5 text-sm w-20 text-right">` :
+                                        `<span class="font-medium underline decoration-dotted underline-offset-4">${appData.cajitas.cantidad}</span>`
+                                    }
+                                </div>
+                            </div>
+                            ${isEditMode ? `
+                                <div class="mt-4 flex justify-end">
+                                    <button onclick="updateCajitas()" class="bg-black text-white text-xs px-4 py-2 rounded hover:bg-neutral-800 cursor-pointer">guardar cambios</button>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="pt-8">
+                            <h2 class="font-bold text-sm tracking-wide mb-3">contacto moreusa:</h2>
+                            <div class="text-sm pl-2">
+                                <p>WPP: <a href="https://${appData.cajitas.whatsapp}" target="_blank" class="underline underline-offset-4 hover:text-neutral-600 transition-colors">${appData.cajitas.whatsapp}</a></p>
+                            </div>
+                        </div>
+
+                        <div class="pt-10 flex justify-start">
+                            <button onclick="switchView('home')" class="text-xs text-neutral-500 hover:text-black underline underline-offset-4 cursor-pointer">← volver al inicio</button>
+                        </div>
+                    </div>
+                `;
+            } else if (currentView === 'postales') {
+                subtitleEl.innerText = 'stock de postales';
+                container.innerHTML = `
+                    <div class="w-full text-left mt-6 md:mt-10 space-y-6">
+                        <div class="flex justify-between items-baseline">
+                            <h2 class="font-bold text-sm tracking-wide">stock:</h2>
+                            ${isEditMode ? '<span class="text-xs text-neutral-400 italic">modo edición activo</span>' : ''}
+                        </div>
+                        
+                        <div class="space-y-1.5 text-sm pl-1">
+                            ${appData.postales.map((p, index) => `
+                                <div class="flex justify-between items-center py-1.5 border-b border-neutral-100/80 hover:bg-neutral-50/50 px-2 rounded transition-colors">
+                                    <span class="font-normal text-neutral-900">${p.nombre}</span>
+                                    <div class="flex items-center gap-3">
+                                        ${isEditMode ? `
+                                            <div class="flex items-center gap-1">
+                                                <button onclick="adjustPostal(${p.id}, -1)" class="w-6 h-6 flex items-center justify-center border border-neutral-300 rounded text-xs hover:bg-neutral-200 cursor-pointer">-</button>
+                                                <input type="number" id="postal-input-${p.id}" value="${p.stock}" class="w-14 border border-neutral-300 rounded text-center text-sm py-0.5" onchange="updateSinglePostal(${p.id}, this.value)">
+                                                <button onclick="adjustPostal(${p.id}, 1)" class="w-6 h-6 flex items-center justify-center border border-neutral-300 rounded text-xs hover:bg-neutral-200 cursor-pointer">+</button>
+                                            </div>
+                                        ` : `
+                                            <span class="text-neutral-600 font-mono text-xs bg-neutral-100 px-2 py-0.5 rounded">${p.stock} un.</span>
+                                        `}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <div class="pt-8">
+                            <h2 class="font-bold text-sm tracking-wide mb-3">contacto unigraf:</h2>
+                            <div class="text-sm pl-2 space-y-1">
+                                <p>WPP ${appData.contactoUnigraf.nombre}: <a href="${appData.contactoUnigraf.link}" target="_blank" class="underline underline-offset-4 hover:text-neutral-600 transition-colors">${appData.contactoUnigraf.whatsapp}</a></p>
+                            </div>
+                        </div>
+
+                        <div class="pt-10 flex justify-start">
+                            <button onclick="switchView('home')" class="text-xs text-neutral-500 hover:text-black underline underline-offset-4 cursor-pointer">← volver al inicio</button>
+                        </div>
+                    </div>
+                `;
+            } else if (currentView === 'archivos') {
+                subtitleEl.innerText = 'archivos';
+                container.innerHTML = `
+                    <div class="w-full text-left mt-8 md:mt-12 space-y-6">
+                        <div class="flex justify-between items-center">
+                            <h2 class="font-bold text-sm tracking-wide">historial y notas de archivo:</h2>
+                            ${isEditMode ? `
+                                <button onclick="addArchivoPrompt()" class="text-xs bg-black text-white px-3 py-1.5 rounded hover:bg-neutral-800 cursor-pointer">+ nueva nota</button>
+                            ` : ''}
+                        </div>
+
+                        <div class="space-y-4 text-sm mt-4">
+                            ${appData.archivos.map((arch, idx) => `
+                                <div class="border-l-2 border-neutral-300 pl-4 py-1 space-y-1">
+                                    <div class="text-xs font-mono text-neutral-400">${arch.fecha}</div>
+                                    <p class="text-neutral-800 text-sm leading-relaxed">${arch.nota}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <div class="pt-10 flex justify-start">
+                            <button onclick="switchView('home')" class="text-xs text-neutral-500 hover:text-black underline underline-offset-4 cursor-pointer">← volver al inicio</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Controller actions
+        function updateCajitas() {
+            const nuevaFecha = document.getElementById('edit-fecha').value;
+            const nuevaCantidad = parseInt(document.getElementById('edit-cajitas').value) || 0;
+            appData.cajitas.ultimaCompra = nuevaFecha;
+            appData.cajitas.cantidad = nuevaCantidad;
+            saveData();
+        }
+
+        function adjustPostal(id, delta) {
+            const postal = appData.postales.find(p => p.id === id);
+            if (postal) {
+                postal.stock = Math.max(0, postal.stock + delta);
+                saveData();
+            }
+        }
+
+        function updateSinglePostal(id, val) {
+            const postal = appData.postales.find(p => p.id === id);
+            if (postal) {
+                postal.stock = Math.max(0, parseInt(val) || 0);
+                saveData();
+            }
+        }
+
+        function addArchivoPrompt() {
+            const notaTexto = prompt("Escribe la nota para el archivo:");
+            if (notaTexto) {
+                const today = new Date().toLocaleDateString('es-AR');
+                appData.archivos.unshift({ fecha: today, nota: notaTexto });
+                saveData();
+            }
+        }
+
+        // Initial render on load
+        window.onload = function() {
+            render();
+        };
+    </script>
+</body>
+</html>
