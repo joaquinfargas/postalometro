@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>postalómetro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        body {
+            font-family: 'Archivo', sans-serif;
+            background-color: #ffffff;
+            color: #000000;
+        }
+        .fade-in {
+            animation: fadeIn 0.25s ease-in-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-6 md:p-12 selection:bg-black selection:text-white">
+
+    <!-- Top header / Navigation bar -->
+    <header class="w-full max-w-3xl mx-auto flex flex-col items-center pt-8 pb-12">
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight cursor-pointer hover:opacity-75 transition-opacity" onclick="switchView('home')">
+            postalómetro
+        </h1>
+        <div id="subtitle-view" class="text-sm font-normal text-neutral-600 mt-1 h-6"></div>
+    </header>
+
+    <!-- Main dynamic content container -->
+    <main id="main-content" class="w-full max-w-xl mx-auto flex-grow flex flex-col items-center justify-start text-center">
+        <!-- Rendered dynamically via JS -->
+    </main>
+
+    <!-- Global Footer / PIN Modal Trigger / Status -->
+    <footer class="w-full max-w-xl mx-auto pt-12 pb-4 flex justify-between items-center text-xs text-neutral-400">
+        <div id="sync-status" class="flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span> Conectado en tiempo real
+        </div>
+        <div>
+            <button onclick="openPinModal()" class="hover:text-black transition-colors underline underline-offset-4 cursor-pointer">
+                modo edición (pin)
+            </button>
+        </div>
+    </footer>
+
+    <!-- PIN Modal -->
+    <div id="pin-modal" class="fixed inset-0 bg-black/40 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
+        <div class="bg-white border border-neutral-200 p-6 rounded-lg max-w-xs w-full shadow-lg text-left fade-in">
+            <h3 class="font-semibold text-sm mb-3">Ingresar PIN de edición</h3>
+            <p class="text-xs text-neutral-500 mb-4">Introduce el código para habilitar la actualización y gestión de stock.</p>
+            <input type="password" id="pin-input" placeholder="••••" class="w-full border border-neutral-300 rounded px-3 py-2 text-sm mb-4 focus:outline-none focus:border-black tracking-widest text-center" maxlength="4">
+            <div class="flex justify-end gap-2">
+                <button onclick="closePinModal()" class="px-3 py-1.5 text-xs text-neutral-600 hover:text-black cursor-pointer">cancelar</button>
+                <button onclick="verifyPin()" class="px-4 py-1.5 text-xs bg-black text-white rounded hover:bg-neutral-800 cursor-pointer">entrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 bg-black text-white text-xs px-4 py-2.5 rounded shadow-lg transform translate-y-12 opacity-0 transition-all duration-300 z-50 pointer-events-none">
+        Cambios guardados correctamente
+    </div>
+
+    <script>
+        // CONFIGURACIÓN DE FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyA6qALGhaZ59ypZq1lrjNQUFr5w7epJgTU",
+            authDomain: "postalometro-stock.firebaseapp.com",
+            projectId: "postalometro-stock",
+            storageBucket: "postalometro-stock.firebasestorage.app",
+            messagingSenderId: "968848190536",
+            appId: "1:968848190536:web:143886fcbf9adc34e8fc7d"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const defaultData = {
+            cajitas: {
+                cantidad: 42,
+                ultimaCompra: "12/03/2026",
+                whatsappMoreusa: "+ 54 9 11 4043-9364"
+            },
+            contactoUnigraf: {
+                nombre: "Gastón",
+                whatsapp: "+54 9 11 6125-7171",
+                link: "https://wa.me/5491161257171"
+            }
+        };
+
+        let postalesData = [];
+        let cajitasData = { cantidad: 42, ultimaCompra: "12/03/2026", whatsappMoreusa: "+ 54 9 11 4043-9364" };
+
+        let currentView = 'home';
+        let isEditMode = false;
+
+        // Escuchar datos de Firestore en TIEMPO REAL
+        db.collection("postales").onSnapshot((snapshot) => {
+            postalesData = [];
+            snapshot.forEach((doc) => {
+                postalesData.push({ id: doc.id, ...doc.data() });
+            });
+            postalesData.sort((a, b) => a.nombre.localeCompare(b.nombre));
+            render();
+        });
+
+        db.collection("config").doc("cajitas").onSnapshot((doc) => {
+            if (doc.exists) {
+                cajitasData = doc.data();
+                render();
+            } else {
+                db.collection("config").doc("cajitas").set(defaultData.cajitas);
+            }
+        });
+
+        function showToast(msg = "Actualizado correctamente") {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.remove('translate-y-12', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-12', 'opacity-0');
+            }, 2500);
+        }
+
+        function switchView(view) {
+            currentView = view;
+            render();
+        }
+
+        function openPinModal() {
+            if (isEditMode) {
+                isEditMode = false;
+                showToast("Modo edición desactivado");
+                render();
+                return;
+            }
+            document.getElementById('pin-modal').classList.remove('hidden');
+            document.getElementById('pin-modal').classList.add('flex');
+            document.getElementById('pin-input').value = '';
+            document.getElementById('pin-input').focus();
+        }
+
+        function closePinModal() {
+            document.getElementById('pin-modal').classList.remove('flex');
+            document.getElementById('pin-modal').classList.add('hidden');
+        }
+
+        function verifyPin() {
+            const pin = document.getElementById('pin-input').value;
+            if (pin === '2026') {
+                isEditMode = true;
+                closePinModal();
+                showToast("Modo edición activado");
+                render();
+            } else {
+                showToast("PIN incorrecto");
+            }
+        }
+
+        function render() {
+            const subtitleEl = document.getElementById('subtitle-view');
+            const container = document.getElementById('main-content');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            container.className = "w-full max-w-xl mx-auto flex-grow flex flex-col items-center justify-start text-center fade-in";
+
+            if (currentView === 'home') {
+                subtitleEl.innerText = '';
+                container.innerHTML = `
+                    <div class="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 mt-16 md:mt-24 text-base font-normal">
+                        <button onclick="switchView('cajitas')" class="hover:opacity-60 transition-opacity cursor-pointer">stock de cajitas</button>
+                        <button onclick="switchView('postales')" class="hover:opacity-60 transition-opacity cursor-pointer">stock de postales</button>
+                        <a href="https://drive.google.com/drive/folders/1Y767Y8M34IDNu9t4nymQuFNua6MJCM3U?usp=drive_link" target="_blank" class="hover:opacity-60 transition-opacity cursor-pointer text-black no-underline">archivos</a>
+                    </div>
+                `;
+            } else if (currentView === 'cajitas') {
+                subtitleEl.innerText = 'stock de cajitas';
+                container.innerHTML = `
+                    <div class="w-full text-left mt-8 md:mt-12 space-y-6">
+                        <div>
+                            <h2 class="font-bold text-sm tracking-wide mb-3">materiales:</h2>
+                            <div class="space-y-2 text-sm pl-2">
+                                <div class="flex justify-between items-center py-1 border-b border-neutral-100">
+                                    <span class="text-neutral-700">última compra:</span>
+                                    ${isEditMode ? 
+                                        `<input type="text" id="edit-fecha" value="${cajitasData.ultimaCompra || ''}" class="border border-neutral-300 rounded px-2 py-0.5 text-sm w-32 text-right">` :
+                                        `<span>(${cajitasData.ultimaCompra || ''})</span>`
+                                    }
+                                </div>
+                                <div class="flex justify-between items-center py-1 border-b border-neutral-100">
+                                    <span class="text-neutral-700">hay cajitas armadas:</span>
+                                    ${isEditMode ? 
+                                        `<input type="number" id="edit-cajitas" value="${cajitasData.cantidad ?? 0}" class="border border-neutral-300 rounded px-2 py-0.5 text-sm w-20 text-right">` :
+                                        `<span class="font-medium underline decoration-dotted underline-offset-4">${cajitasData.cantidad ?? 0}</span>`
+                                    }
+                                </div>
+                            </div>
+                            ${isEditMode ? `
+                                <div class="mt-4 flex justify-end">
+                                    <button onclick="updateCajitas()" class="bg-black text-white text-xs px-4 py-2 rounded hover:bg-neutral-800 cursor-pointer">guardar cambios</button>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="pt-8">
+                            <h2 class="font-bold text-sm tracking-wide mb-3">contacto moreusa:</h2>
+                            <div class="text-sm pl-2">
+                                <p>WPP: <a href="https://wa.me/5491140439364" target="_blank" class="underline underline-offset-4 hover:text-neutral-600 transition-colors">${cajitasData.whatsappMoreusa || '+ 54 9 11 4043-9364'}</a></p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (currentView === 'postales') {
+                subtitleEl.innerText = 'stock de postales';
+                container.innerHTML = `
+                    <div class="w-full text-left mt-6 md:mt-10 space-y-6">
+                        <div class="flex justify-between items-center">
+                            <h2 class="font-bold text-sm tracking-wide">stock:</h2>
+                            ${isEditMode ? `
+                                <button onclick="openAddPostalForm()" class="text-xs bg-black text-white px-3 py-1.5 rounded hover:bg-neutral-800 cursor-pointer">+ agregar postal</button>
+                            ` : ''}
+                        </div>
+
+                        <div id="add-postal-container" class="hidden bg-neutral-50 border border-neutral-200 p-4 rounded-lg my-3 space-y-3 fade-in">
+                            <h3 class="text-xs font-bold uppercase tracking-wider text-neutral-700">Nueva postal / obra</h3>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input type="text" id="new-postal-name" placeholder="Nombre de la obra..." class="flex-grow border border-neutral-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-black">
+                                <input type="number" id="new-postal-stock" placeholder="Stock inicial" value="100" class="w-28 border border-neutral-300 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-black text-center">
+                            </div>
+                            <div class="flex justify-end gap-2 pt-1">
+                                <button onclick="document.getElementById('add-postal-container').classList.add('hidden')" class="px-3 py-1 text-xs text-neutral-600 hover:text-black cursor-pointer">cancelar</button>
+                                <button onclick="addNewPostalItem()" class="px-4 py-1 text-xs bg-black text-white rounded hover:bg-neutral-800 cursor-pointer">guardar nueva</button>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-1.5 text-sm pl-1 max-h-[450px] overflow-y-auto">
+                            ${postalesData.map((p) => `
+                                <div class="flex justify-between items-center py-1.5 border-b border-neutral-100/80 hover:bg-neutral-50/50 px-2 rounded transition-colors group">
+                                    <div class="flex items-center gap-2 flex-grow">
+                                        ${isEditMode ? `
+                                            <button onclick="deletePostal('${p.id}')" class="text-neutral-400 hover:text-red-600 text-xs px-1 cursor-pointer" title="Eliminar postal">×</button>
+                                            <input type="text" value="${p.nombre}" class="border border-transparent hover:border-neutral-300 focus:border-neutral-400 rounded px-1 py-0.5 text-sm w-full bg-transparent focus:bg-white" onchange="updatePostalName('${p.id}', this.value)">
+                                        ` : `
+                                            <span class="font-normal text-neutral-900">${p.nombre}</span>
+                                        `}
+                                    </div>
+                                    <div class="flex items-center gap-3 shrink-0">
+                                        ${isEditMode ? `
+                                            <div class="flex items-center gap-1">
+                                                <button onclick="adjustPostal('${p.id}', -1)" class="w-6 h-6 flex items-center justify-center border border-neutral-300 rounded text-xs hover:bg-neutral-200 cursor-pointer">-</button>
+                                                <input type="number" id="postal-input-${p.id}" value="${p.stock}" class="w-14 border border-neutral-300 rounded text-center text-sm py-0.5" onchange="updateSinglePostal('${p.id}', this.value)">
+                                                <button onclick="adjustPostal('${p.id}', 1)" class="w-6 h-6 flex items-center justify-center border border-neutral-300 rounded text-xs hover:bg-neutral-200 cursor-pointer">+</button>
+                                            </div>
+                                        ` : `
+                                            <span class="text-neutral-600 font-mono text-xs bg-neutral-100 px-2 py-0.5 rounded">${p.stock} un.</span>
+                                        `}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <div class="pt-8">
+                            <h2 class="font-bold text-sm tracking-wide mb-3">contacto unigraf:</h2>
+                            <div class="text-sm pl-2 space-y-1">
+                                <p>WPP Gastón: <a href="https://wa.me/5491161257171" target="_blank" class="underline underline-offset-4 hover:text-neutral-600 transition-colors">+54 9 11 6125-7171</a></p>
+                            </div>
+                        </div>
+
+                        <div class="pt-10 flex justify-start">
+                            <button onclick="switchView('home')" class="text-xs text-neutral-500 hover:text-black underline underline-offset-4 cursor-pointer">← volver al inicio</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function updateCajitas() {
+            const nuevaFecha = document.getElementById('edit-fecha').value;
+            const nuevaCantidad = parseInt(document.getElementById('edit-cajitas').value) || 0;
+            db.collection("config").doc("cajitas").update({
+                ultimaCompra: nuevaFecha,
+                cantidad: nuevaCantidad
+            }).then(() => {
+                showToast("Cajitas actualizadas");
+            });
+        }
+
+        function adjustPostal(id, delta) {
+            const postal = postalesData.find(p => p.id === id);
+            if (postal) {
+                const nuevoStock = Math.max(0, postal.stock + delta);
+                db.collection("postales").doc(id).update({ stock: nuevoStock });
+            }
+        }
+
+        function updateSinglePostal(id, val) {
+            const nuevoStock = Math.max(0, parseInt(val) || 0);
+            db.collection("postales").doc(id).update({ stock: nuevoStock });
+        }
+
+        function updatePostalName(id, newName) {
+            if (newName.trim() !== '') {
+                db.collection("postales").doc(id).update({ nombre: newName.trim() });
+            }
+        }
+
+        function openAddPostalForm() {
+            const formContainer = document.getElementById('add-postal-container');
+            formContainer.classList.toggle('hidden');
+            if (!formContainer.classList.contains('hidden')) {
+                document.getElementById('new-postal-name').focus();
+            }
+        }
+
+        function addNewPostalItem() {
+            const nameInput = document.getElementById('new-postal-name');
+            const stockInput = document.getElementById('new-postal-stock');
+            const name = nameInput.value.trim();
+            const stock = parseInt(stockInput.value) || 0;
+
+            if (!name) {
+                showToast("Por favor ingresa un nombre para la obra");
+                return;
+            }
+
+            db.collection("postales").add({
+                nombre: name,
+                stock: stock
+            }).then(() => {
+                showToast("Postal agregada");
+                document.getElementById('add-postal-container').classList.add('hidden');
+            });
+        }
+
+        function deletePostal(id) {
+            if (confirm("¿Estás seguro de eliminar esta postal del listado?")) {
+                db.collection("postales").doc(id).delete().then(() => {
+                    showToast("Postal eliminada");
+                });
+            }
+        }
+    </script>
+</body>
+</html>
